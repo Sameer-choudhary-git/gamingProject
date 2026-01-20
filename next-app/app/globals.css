@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/* 1. Plugins */
+@plugin "tailwindcss-animate";
+
+/* 2. Dark Mode Config */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 3. Theme Configuration (Tailwind v4) */
+@theme {
+  /* Link Next.js Font Variables to Tailwind Utilities */
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+
+  /* Radius */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Map Colors (Wrap CSS vars in hsl() for opacity support) */
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  /* Hardcoded Gaming Colors (for gradients/badges) */
+  --color-gold: #FFD700;
+  --color-silver: #C0C0C0;
+  --color-bronze: #CD7F32;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+}
+
+/* 4. CSS Variables (The Color Palette) */
+:root {
+  /* Default to Dark Mode values to prevent flash of white */
+  --background: 220 30% 6%; /* #0B0E14 */
+  --foreground: 210 40% 98%;
+  --card: 225 21% 11%;
+  --card-foreground: 210 40% 98%;
+  --popover: 225 21% 11%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 189 94% 43%; /* Cyan */
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 189 94% 43%;
+  --radius: 0.5rem;
+}
+
+/* Ensure Dark Mode uses the same values */
+.dark {
+  --background: 220 30% 6%;
+  --foreground: 210 40% 98%;
+  --card: 225 21% 11%;
+  --card-foreground: 210 40% 98%;
+  --popover: 225 21% 11%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 189 94% 43%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 189 94% 43%;
+}
+
+/* 5. Base Styles */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans); /* Default body font */
+  }
+  
+  /* Apply Rajdhani to Headings automatically */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+}
+
+/* 6. Custom Utilities */
+@utility text-glow-primary {
+  text-shadow: 0 0 10px hsla(var(--primary) / 0.5), 0 0 20px hsla(var(--primary) / 0.3);
+}
+
+@utility text-glow-success {
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+@utility gaming-card {
+  @apply bg-card border border-border/50 rounded-xl shadow-xl transition-all duration-300;
+  &:hover {
+    @apply border-primary/50 shadow-[0_0_20px_rgba(6,182,212,0.15)];
+  }
+}
+
+@utility gradient-text-primary {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-400;
+}
+
+@utility gradient-text-gold {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-yellow-600;
+}
+
+@utility stat-badge {
+  @apply flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-white/5 text-xs font-medium text-muted-foreground;
+}
+
+/* Custom Scrollbar */
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #4B5563;
+  }
+}

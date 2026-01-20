@@ -1,0 +1,121 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================================================
+// ENUMS
+// =========================================================
+
+enum GameType {
+  CHESS
+  POKER
+  BLACKJACK
+}
+
+enum GameMode {
+  PVP
+  AI
+}
+
+enum GameStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  ABORTED
+}
+
+enum GameResult {
+  WIN
+  LOSS
+  DRAW
+  ABANDONED
+}
+
+// =========================================================
+// MODELS
+// =========================================================
+
+model User {
+  id            String    @id @default(uuid())
+  walletAddress String    @unique // Primary way we identify users in Web3
+  username      String?   @unique
+  avatar        String?
+
+  rating        Rating[]       
+  
+  // Relations
+  matchesAsPlayer1 Match[] @relation("Player1") 
+  matchesAsPlayer2 Match[] @relation("Player2")
+  transactions     Transaction[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([walletAddress])
+}
+
+model Rating {
+  id        String  @id @default(uuid())
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id])
+  
+  chessRating    Int     @default(1200)
+  pokerRating    Int     @default(1200)
+  blackjackRating Int    @default(1200)
+  
+  updatedAt DateTime @updatedAt
+}
+
+model Match {
+  id              String      @id @default(uuid())
+  contractGameId  String?     // ID from the Smart Contract (for PvP)
+  gameType        GameType
+  mode            GameMode
+  status          GameStatus  @default(WAITING)
+  
+  // Players
+  player1Id       String
+  player1         User        @relation("Player1", fields: [player1Id], references: [id])
+  
+  player2Id       String?     // Nullable for AI games or waiting lobbies
+  player2         User?       @relation("Player2", fields: [player2Id], references: [id])
+  
+  // Game Data
+  winnerId        String?     // ID of the winning user
+  result          GameResult? 
+  entryFee        String?     // Stored as string to handle BigInt/Wei
+  currency        String      @default("ETH") // "ETH" or "GAME"
+  
+  // Technical Data
+  pgn             String?     // Portable Game Notation (Chess moves)
+  startedAt       DateTime    @default(now())
+  endedAt         DateTime?
+  
+  @@index([contractGameId])
+  @@index([status])
+}
+
+model Transaction {
+  id            String   @id @default(uuid())
+  txHash        String   @unique
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  
+  type          String   // "CREATE_GAME", "JOIN_GAME", "CLAIM_WIN"
+  amount        String?
+  currency      String   @default("ETH")
+  status        String   // "PENDING", "CONFIRMED", "FAILED"
+  
+  createdAt     DateTime @default(now())
+}
