@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -11,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // =========================================================
@@ -42,80 +37,110 @@ enum GameResult {
   ABANDONED
 }
 
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+}
+
 // =========================================================
 // MODELS
 // =========================================================
 
 model User {
-  id            String    @id @default(uuid())
-  walletAddress String    @unique // Primary way we identify users in Web3
-  username      String?   @unique
-  avatar        String?
-
-  rating        Rating[]       
+  id                 String       @id @default(cuid())
+  walletAddress      String       @unique // Primary way we identify users in Web3
+  username           String       @unique
+  email              String?      @unique
+  avatar             String?
+  hasClaimedAirdrop  Boolean      @default(false)
   
   // Relations
-  matchesAsPlayer1 Match[] @relation("Player1") 
-  matchesAsPlayer2 Match[] @relation("Player2")
-  transactions     Transaction[]
+  rating             Rating?      // 1-to-1 relation (One rating profile per user)
+  
+  // Friend System (Two-way relation)
+  friends            Friend[]     @relation("UserFriends") // Requests I SENT
+  friendOf           Friend[]     @relation("FriendOf")    // Requests I RECEIVED
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  matchesAsPlayer1   Match[]      @relation("Player1") 
+  matchesAsPlayer2   Match[]      @relation("Player2")
+  transactions       Transaction[]
+  
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   @@index([walletAddress])
 }
 
+model Friend {
+  id            String       @id @default(cuid())
+  
+  // The person sending the request
+  userId        String
+  user          User         @relation("UserFriends", fields: [userId], references: [id])
+  
+  // The person receiving the request
+  friendId      String
+  friend        User         @relation("FriendOf", fields: [friendId], references: [id])
+  
+  status        FriendStatus @default(PENDING)
+  friendRating  Int          @default(0) // Optional: Custom rating/closeness metric
+  createdAt     DateTime     @default(now())
+
+  // Prevents duplicate friendship records between the same two people
+  @@unique([userId, friendId])
+}
+
 model Rating {
-  id        String  @id @default(uuid())
-  userId    String  @unique
-  user      User    @relation(fields: [userId], references: [id])
+  id                 String       @id @default(cuid())
+  userId             String       @unique
+  user               User         @relation(fields: [userId], references: [id])
   
-  chessRating    Int     @default(1200)
-  pokerRating    Int     @default(1200)
-  blackjackRating Int    @default(1200)
+  chessRating        Int          @default(1200) // Standard starting ELO
+  pokerRating        Int          @default(1200)
+  blackjackRating    Int          @default(1200)
   
-  updatedAt DateTime @updatedAt
+  updatedAt          DateTime     @updatedAt
 }
 
 model Match {
-  id              String      @id @default(uuid())
-  contractGameId  String?     // ID from the Smart Contract (for PvP)
-  gameType        GameType
-  mode            GameMode
-  status          GameStatus  @default(WAITING)
+  id                 String       @id @default(cuid())
+  contractGameId     String?      // ID from the Smart Contract (for PvP)
+  gameType           GameType
+  mode               GameMode
+  status             GameStatus   @default(WAITING)
   
   // Players
-  player1Id       String
-  player1         User        @relation("Player1", fields: [player1Id], references: [id])
+  player1Id          String
+  player1            User         @relation("Player1", fields: [player1Id], references: [id])
   
-  player2Id       String?     // Nullable for AI games or waiting lobbies
-  player2         User?       @relation("Player2", fields: [player2Id], references: [id])
+  player2Id          String?      // Nullable for AI games or waiting lobbies
+  player2            User?        @relation("Player2", fields: [player2Id], references: [id])
   
   // Game Data
-  winnerId        String?     // ID of the winning user
-  result          GameResult? 
-  entryFee        String?     // Stored as string to handle BigInt/Wei
-  currency        String      @default("ETH") // "ETH" or "GAME"
+  winnerId           String?      // ID of the winning user
+  result             GameResult? 
+  entryFee           String?      // Stored as string to handle BigInt/Wei
+  currency           String       @default("ETH") // "ETH" or "GAME"
   
   // Technical Data
-  pgn             String?     // Portable Game Notation (Chess moves)
-  startedAt       DateTime    @default(now())
-  endedAt         DateTime?
+  pgn                String?      // Portable Game Notation (Chess moves)
+  startedAt          DateTime     @default(now())
+  endedAt            DateTime?
   
   @@index([contractGameId])
   @@index([status])
 }
 
 model Transaction {
-  id            String   @id @default(uuid())
-  txHash        String   @unique
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
+  id             String   @id @default(cuid())
+  txHash         String   @unique
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
   
-  type          String   // "CREATE_GAME", "JOIN_GAME", "CLAIM_WIN"
-  amount        String?
-  currency      String   @default("ETH")
-  status        String   // "PENDING", "CONFIRMED", "FAILED"
+  type           String   // "CREATE_GAME", "JOIN_GAME", "CLAIM_WIN", "JOIN_AIRDROP"
+  amount         String?
+  currency       String   @default("GAME")
+  status         String   // "PENDING", "CONFIRMED", "FAILED"
   
-  createdAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
 }

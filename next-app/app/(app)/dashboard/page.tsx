@@ -1,127 +1,140 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useGameStore } from '@/stores/gameStore';
-import { Button } from '@/ui/button'; // Adjusted path based on your previous fix
-import { 
-  shortenAddress, 
-  getGameBalance, 
-  getEthBalance,
-  switchToBase,
-  isOnCorrectNetwork,
-  NETWORK
-} from '@/lib/wallet';
+// Alchemy Hooks
+import { useUser, useLogout, useSmartAccountClient } from "@account-kit/react";
+import { Button } from '@/ui/button'; 
+import { shortenAddress } from '@/lib/wallet';
 import { 
   Gamepad2, Users, Trophy, Wallet, Bell, 
-  Settings, LogOut, ChevronRight, 
-  Swords, Coins, Loader2, AlertCircle 
+  Settings, ChevronRight, Swords, Coins, 
+  Loader2, LogOut 
 } from 'lucide-react';
 
+// --- VIEM IMPORTS (Required for reading Smart Contracts) ---
+import { createPublicClient, http, parseAbi, formatEther } from 'viem';
+import { baseSepolia } from 'viem/chains';
+
+// --- CONFIGURATION ---
+const GAME_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_GAME_TOKEN_ADDRESS as `0x${string}`;
+
+// Minimal ABI to read ERC-20 Balance
+const ERC20_ABI = parseAbi([
+  "function balanceOf(address owner) view returns (uint256)",
+  "function decimals() view returns (uint8)"
+]);
+
+// Create a Read-Only Client (Public Client)
+const publicClient = createPublicClient({
+  chain: baseSepolia,
+  transport: http(process.env.NEXT_PUBLIC_RPC_URL || "https://sepolia.base.org")
+});
+
 export default function DashboardPage() {
-  const router = useRouter(); // Changed from navigate
+  const router = useRouter();
+  
+  // Alchemy Hooks
+  const user = useUser();
+  const { logout } = useLogout();
+  const { client } = useSmartAccountClient({ type: "LightAccount" }); 
+
+  // Local UI State
   const [isLoading, setIsLoading] = useState(true);
   const [ethBalance, setEthBalance] = useState('0');
-  const [gameBalance, setGameBalance] = useState('0');
-  const [wrongNetwork, setWrongNetwork] = useState(false);
+  const [gameBalance, setGameBalance] = useState('0'); // Local state for display
   
+  // Zustand Store
   const { 
     currentUser, 
-    walletAddress, 
-    balance,
     friends,
-    recentMatches,
     notifications,
     lobbies,
     setCurrentUser,
     setWalletAddress,
-    setBalance
+    setBalance // Updates global store
   } = useGameStore();
 
-  useEffect(() => {
-    const checkSession = async () => {
-      // If user is already loaded, just check network
-      if (currentUser && walletAddress) {
-        await loadBalances(walletAddress);
-        setIsLoading(false);
-        return;
-      }
+  // --- 1. CORE LOGIC: Initialize Dashboard ---
+  const initDashboard = useCallback(async () => {
+    if (!user?.address || !client) return;
 
-      // Try to auto-connect
-      if (typeof window !== 'undefined' && typeof window.ethereum !== 'undefined') {
+    try {
+      // Step A: Sync Wallet Address
+      setWalletAddress(user.address);
+
+      // Step B: Hydrate User Profile
+      if (!currentUser) {
         try {
-          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+          const res = await fetch("/api/user/check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ address: user.address }),
+          });
           
-          if (accounts.length > 0) {
-            const address = accounts[0];
-            
-            // Check network
-            const onCorrectNetwork = await isOnCorrectNetwork();
-            if (!onCorrectNetwork) {
-              setWrongNetwork(true);
-              setIsLoading(false);
-              return;
-            }
-            
-            // Check for stored user
-            const storedUser = localStorage.getItem(`user_${address}`);
-            
-            if (storedUser) {
-              setWalletAddress(address);
-              setCurrentUser(JSON.parse(storedUser));
-              await loadBalances(address);
-              setIsLoading(false);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.exists && data.user) {
+              setCurrentUser(data.user);
+            } else {
+              router.push('/'); 
               return;
             }
           }
-        } catch (error) {
-          console.error("Session check failed", error);
+        } catch (err) {
+          console.error("Profile fetch failed:", err);
         }
       }
+
+      // Step C: Fetch Balances in Parallel
+      // 1. Native ETH Balance (via Smart Account Client)
+      const ethPromise = client.getBalance({ address: user.address });
       
-      // No session found, redirect to landing
-      router.push('/');
-    };
+      // 2. Game Token Balance (via Public Client)
+      const gamePromise = GAME_TOKEN_ADDRESS 
+        ? publicClient.readContract({
+            address: GAME_TOKEN_ADDRESS,
+            abi: ERC20_ABI,
+            functionName: 'balanceOf',
+            args: [user.address]
+          })
+        : Promise.resolve(0); // Default to 0 if no address set
 
-    checkSession();
-  }, [currentUser, walletAddress, router, setCurrentUser, setWalletAddress, setBalance]);
+      const [ethBigInt, gameBigInt] = await Promise.all([ethPromise, gamePromise]);
 
-  const loadBalances = async (address: string) => {
-    try {
-      const [eth, game] = await Promise.all([
-        getEthBalance(address),
-        getGameBalance(address)
-      ]);
-      
-      setEthBalance(eth);
-      setGameBalance(game);
-      setBalance(parseFloat(game));
+      // Format Results
+      const formattedEth = formatEther(ethBigInt);
+      const formattedGame = formatEther(gameBigInt as bigint); // Assuming 18 decimals
+
+      setEthBalance(formattedEth);
+      setGameBalance(formattedGame);
+      setBalance(parseFloat(formattedGame)); // Update global store with GAME token amount
+
     } catch (error) {
-      console.error("Failed to load balances:", error);
+      console.error("Dashboard init error:", error);
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [user, client, currentUser, setWalletAddress, setCurrentUser, setBalance, router]);
 
-  const handleSwitchNetwork = async () => {
-    try {
-      await switchToBase();
-      setWrongNetwork(false);
-      if (walletAddress) {
-        await loadBalances(walletAddress);
-      }
-    } catch (error) {
-      console.error("Failed to switch network:", error);
-    }
-  };
+  useEffect(() => {
+    initDashboard();
+  }, [initDashboard]);
+
+
+  // --- 2. HANDLERS ---
 
   const handleLogout = () => {
+    logout();
     setCurrentUser(null);
     setWalletAddress(null);
-    setBalance(0);
     router.push('/');
   };
 
-  // Loading state
+  // --- 3. RENDER ---
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -133,49 +146,14 @@ export default function DashboardPage() {
     );
   }
 
-  // Wrong network warning
-  if (wrongNetwork) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-card border border-border p-8 rounded-xl max-w-md w-full text-center shadow-2xl"
-        >
-          <AlertCircle className="w-16 h-16 text-destructive mx-auto mb-4" />
-          <h2 className="font-display text-2xl font-bold mb-4">Wrong Network</h2>
-          <p className="text-muted-foreground mb-6">
-            Please switch to {NETWORK.chainName} to continue using the gaming platform.
-          </p>
-          <div className="space-y-3">
-            <Button 
-              variant="hero" 
-              className="w-full"
-              onClick={handleSwitchNetwork}
-            >
-              Switch to {NETWORK.chainName}
-            </Button>
-            <Button 
-              variant="ghost" 
-              className="w-full"
-              onClick={() => router.push('/')}
-            >
-              Go Back
-            </Button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (!currentUser) return null;
-
+  const displayUser = currentUser || { username: 'Player', avatar: '👾', rating: 0 };
   const unreadNotifications = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex">
+      
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-card border-r border-border p-4 flex flex-col z-20">
+      <aside className="fixed left-0 top-0 h-full w-64 bg-card border-r border-border p-4 flex flex-col z-20 hidden md:flex">
         <div className="flex items-center gap-3 mb-8 px-2">
           <Gamepad2 className="w-8 h-8 text-primary" />
           <span className="font-display text-lg font-bold">Gaming Hub</span>
@@ -204,11 +182,11 @@ export default function DashboardPage() {
         {/* Network Info */}
         <div className="mb-4 bg-muted/50 rounded-lg p-3 border border-border">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-            {NETWORK.chainName}
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            Base Sepolia
           </div>
           <div className="text-xs text-muted-foreground">
-            Chain ID: {NETWORK.chainIdDecimal}
+            Smart Wallet Active
           </div>
         </div>
 
@@ -225,12 +203,13 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main Content */}
-      <main className="ml-64 p-8">
+      <main className="md:ml-64 flex-1 p-8 w-full">
+        
         {/* Header */}
-        <header className="flex items-center justify-between mb-8">
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="font-display text-3xl font-bold">
-              Welcome back, <span className="text-primary">{currentUser.username}</span>
+              Welcome back, <span className="text-primary">{displayUser.username}</span>
             </h1>
             <p className="text-muted-foreground">Ready to play?</p>
           </div>
@@ -247,14 +226,14 @@ export default function DashboardPage() {
             </Button>
 
             {/* Wallet & Balances */}
-            <div className="bg-card border border-border rounded-lg px-4 py-2 shadow-sm">
+            <div className="hidden md:block bg-card border border-border rounded-lg px-4 py-2 shadow-sm">
               <div className="flex items-center gap-3">
                 <Wallet className="w-5 h-5 text-primary" />
                 <div>
-                  <div className="text-sm font-medium">{shortenAddress(walletAddress || '')}</div>
+                  <div className="text-sm font-medium">{shortenAddress(user?.address || '')}</div>
                   <div className="flex gap-3 text-xs text-muted-foreground mt-1">
-                    <span>ETH: {parseFloat(ethBalance).toFixed(4)}</span>
-                    <span className="text-primary font-medium">GAME: {parseFloat(gameBalance).toFixed(2)}</span>
+                    <span>{parseFloat(ethBalance).toFixed(4)} ETH</span>
+                    <span className="text-primary font-bold">{parseFloat(gameBalance).toFixed(0)} GAME</span>
                   </div>
                 </div>
               </div>
@@ -263,18 +242,18 @@ export default function DashboardPage() {
             {/* Profile */}
             <div className="bg-card border border-border rounded-lg px-4 py-2 flex items-center gap-3 cursor-pointer hover:border-primary/50 transition-colors shadow-sm" onClick={() => router.push('/profile')}>
               <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-xl">
-                {currentUser.avatar}
+                {displayUser.avatar || '👾'}
               </div>
-              <div>
-                <div className="text-sm font-medium">{currentUser.username}</div>
-                <div className="text-xs text-muted-foreground">ELO: {currentUser.rating}</div>
+              <div className="hidden md:block">
+                <div className="text-sm font-medium">{displayUser.username}</div>
+                <div className="text-xs text-muted-foreground">ELO: {displayUser.rating || 0}</div>
               </div>
             </div>
           </div>
         </header>
 
         {/* Quick Actions */}
-        <section className="grid grid-cols-3 gap-6 mb-8">
+        <section className="grid md:grid-cols-3 gap-6 mb-8">
           {[
             { 
               title: 'Quick Match', 
@@ -287,7 +266,7 @@ export default function DashboardPage() {
               title: 'Create Lobby', 
               description: 'Host your own game',
               icon: Users,
-              color: 'text-secondary-foreground', // Adjusted for shadcn theme
+              color: 'text-foreground', 
               action: () => router.push('/lobbies?create=true')
             },
             { 
@@ -315,9 +294,9 @@ export default function DashboardPage() {
         </section>
 
         {/* Main Dashboard Grid */}
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid lg:grid-cols-3 gap-6">
           {/* Active Lobbies */}
-          <div className="col-span-2">
+          <div className="lg:col-span-2">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-display text-xl font-bold">Active Lobbies</h2>
               <Button variant="ghost" size="sm" onClick={() => router.push('/lobbies')}>
@@ -383,7 +362,7 @@ export default function DashboardPage() {
                       <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-lg">
                         {friend.avatar}
                       </div>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-success rounded-full border-2 border-background" />
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-background" />
                     </div>
                     <div>
                       <div className="text-sm font-medium">{friend.username}</div>
@@ -405,39 +384,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-
-        {/* Recent Matches */}
-        {recentMatches && recentMatches.length > 0 && (
-          <section className="mt-8">
-            <h2 className="font-display text-xl font-bold mb-4">Recent Matches</h2>
-            <div className="bg-card border border-border rounded-lg p-4">
-              <div className="space-y-3">
-                {recentMatches.slice(0, 5).map((match, idx) => (
-                  <div key={idx} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                    <div className="flex items-center gap-4">
-                      <div className="text-2xl">
-                        {match.gameType === 'chess' ? '♟️' : '🃏'}
-                      </div>
-                      <div>
-                        <div className="font-medium">{match.opponent}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {new Date(match.date).toLocaleDateString()}
-                        </div>
-                      </div>
-                    </div>
-                    <div className={`font-bold ${
-                      match.result === 'win' ? 'text-success' : 
-                      match.result === 'loss' ? 'text-destructive' : 
-                      'text-muted-foreground'
-                    }`}>
-                      {match.result.toUpperCase()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
       </main>
     </div>
   );
